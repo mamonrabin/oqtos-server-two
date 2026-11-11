@@ -28,6 +28,7 @@ import { blogRoutes } from '../modules/blog/blog.route.js';
 import { affiliateRoutes } from '../modules/affiliate/affiliate.route.js';
 import { customeRoutes } from '../modules/custome-design/custome-design.route.js';
 import { themeRouter } from '../modules/theme/theme.route.js';
+import { visitorRoutes } from '../modules/visitor/visitor.route.js';
 
 export const router = Router();
 
@@ -147,6 +148,10 @@ const moduleRoutes = [
   {
     path: '/theme',
     route: themeRouter,
+  },
+  {
+    path: '/visitor',
+    route: visitorRoutes,
   },
 ];
 moduleRoutes.forEach((route) => {

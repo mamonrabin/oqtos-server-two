@@ -1,19 +1,29 @@
+
 /* eslint-disable @typescript-eslint/no-unused-vars */
+
 import type { NextFunction, Request, Response } from 'express';
 import { catchAsync } from '../../utils/catchAsync.js';
 import { sendResponse } from '../../utils/sendResponse.js';
 import httpStatus from 'http-status-codes';
 import { brandService } from './brand.service.js';
+import { uploadBufferToCloudinary } from '../../config/cloudinary.config.js';
 
+// Create Brand
 const createBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const brand = req.body;
+    if (!req.file) {
+      throw new Error('Brand image is required');
+    }
 
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : '';
+    const imageUpload = await uploadBufferToCloudinary(
+      req.file.buffer,
+      req.file.originalname,
+      'brands',
+    );
 
     const result = await brandService.createBrand({
-      ...brand,
-      image: imageUrl,
+      ...req.body,
+      image: imageUpload.secure_url,
     });
 
     return sendResponse(res, {
@@ -25,22 +35,25 @@ const createBrand = catchAsync(
   },
 );
 
+// Get All Brands Without Builder
 const getAllBrandWithoutBuilder = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
-    const query = req.query;
     const result = await brandService.getAllBrandWithoutBuilder();
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get all brand successfully',
+      message: 'Get all brands successfully',
       data: result,
     });
   },
 );
+
+// Get All Brands
 const getAllBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const query = req.query;
+
     const result = await brandService.getAllBrand(
       query as Record<string, string>,
     );
@@ -48,12 +61,13 @@ const getAllBrand = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get all brand successfully',
+      message: 'Get all brands successfully',
       data: result,
     });
   },
 );
 
+// Get All Active Brands
 const getAllActiveBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const result = await brandService.getActiveAllBrand();
@@ -61,29 +75,33 @@ const getAllActiveBrand = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get all active brand successfully',
+      message: 'Get all active brands successfully',
       data: result,
     });
   },
 );
 
+// Get Single Brand
 const getSingleBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
+
     const result = await brandService.getSingleBrand(id as string);
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get single brand successfully',
+      message: 'Get single brand successfully',
       data: result,
     });
   },
 );
 
+// Get Single Brand By Slug
 const getSingleBrandBySlug = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
+
     const result = await brandService.getSingleBrandBySlug(
       slug as string,
     );
@@ -91,43 +109,54 @@ const getSingleBrandBySlug = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get single brand by slug successfully',
+      message: 'Get single brand by slug successfully',
       data: result,
     });
   },
 );
 
-const updateSingleBrand = catchAsync(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const updateBrand = req.body;
+// Update Brand
+const updateSingleBrand = catchAsync(
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const updateBrand = { ...req.body };
 
-  const imageUrl = req.file
-    ? `/uploads/${req.file.filename}`
-    : updateBrand.image;
+    // Upload new image only when provided
+    if (req.file) {
+      const imageUpload = await uploadBufferToCloudinary(
+        req.file.buffer,
+        req.file.originalname,
+        'brands',
+      );
 
-  const result = await brandService.updateSingleBrand(id as string, {
-    ...updateBrand,
-    image: imageUrl,
-  });
+      updateBrand.image = imageUpload.secure_url;
+    }
 
-  return sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: 'brand Updated Successfully',
-    data: result,
-  });
-});
+    const result = await brandService.updateSingleBrand(
+      id as string,
+      updateBrand,
+    );
 
+    return sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.OK,
+      message: 'Brand updated successfully',
+      data: result,
+    });
+  },
+);
 
+// Delete Brand
 const deleteSingleBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
+
     const result = await brandService.deleteSingleBrand(id as string);
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' delete single brand successfully',
+      message: 'Delete single brand successfully',
       data: result,
     });
   },
@@ -141,5 +170,5 @@ export const brandController = {
   getSingleBrand,
   getSingleBrandBySlug,
   updateSingleBrand,
-  deleteSingleBrand
+  deleteSingleBrand,
 };

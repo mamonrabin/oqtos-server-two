@@ -1,54 +1,135 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import type { NextFunction, Request, Response } from 'express';
-import httpStatus from 'http-status-codes';
-import { catchAsync } from '../../utils/catchAsync.js';
-import { productService } from './product.service.js';
-import { sendResponse } from '../../utils/sendResponse.js';
-import type { ProductLabel } from './product.interface.js';
 
-const createProduct = catchAsync(async (req: Request, res: Response) => {
-  const files = req.files as any;
+/* eslint-disable @typescript-eslint/no-unused-vars */
 
-  const productData = req.body;
+import type { NextFunction, Request, Response } from "express";
+import httpStatus from "http-status-codes";
 
-  const thumbnail = files?.thumbnailImage?.[0]?.filename;
-  const backview = files?.backviewImage?.[0]?.filename;
+import { catchAsync } from "../../utils/catchAsync.js";
+import { productService } from "./product.service.js";
+import { sendResponse } from "../../utils/sendResponse.js";
+import type { ProductLabel } from "./product.interface.js";
 
-  const images = files?.images?.map((f: any) => `/uploads/${f.filename}`) || [];
+import {
+  uploadBufferToCloudinary,
+} from "../../config/cloudinary.config.js";
 
-  if (req.body.inventories) {
-    productData.inventories = JSON.parse(req.body.inventories);
+// ============================================
+// Helper: Get Multer files
+// ============================================
+
+type ProductFiles = {
+  thumbnailImage?: Express.Multer.File[];
+  backviewImage?: Express.Multer.File[];
+  images?: Express.Multer.File[];
+};
+
+const getProductFiles = (req: Request): ProductFiles => {
+  return (req.files || {}) as ProductFiles;
+};
+
+// ============================================
+// Helper: Parse JSON fields
+// ============================================
+
+const parseProductData = (data: any) => {
+  const productData = { ...data };
+
+  if (productData.inventories) {
+    productData.inventories =
+      typeof productData.inventories === "string"
+        ? JSON.parse(productData.inventories)
+        : productData.inventories;
   }
 
   if (productData.specifications) {
-    productData.specifications = JSON.parse(productData.specifications);
-  }
-
-  // Convert boolean
-  if (productData.freeShipping !== undefined) {
-    productData.freeShipping = productData.freeShipping === 'true';
+    productData.specifications =
+      typeof productData.specifications === "string"
+        ? JSON.parse(productData.specifications)
+        : productData.specifications;
   }
 
   if (productData.tags) {
-  productData.tags = JSON.parse(productData.tags);
-}
+    productData.tags =
+      typeof productData.tags === "string"
+        ? JSON.parse(productData.tags)
+        : productData.tags;
+  }
 
-  const result = await productService.createProduct({
-    ...productData,
-    thumbnailImage: thumbnail ? `/uploads/${thumbnail}` : '',
-    backviewImage: backview ? `/uploads/${backview}` : '',
-    images,
-  });
+  if (productData.freeShipping !== undefined) {
+    productData.freeShipping =
+      productData.freeShipping === true ||
+      productData.freeShipping === "true";
+  }
 
-  return sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.CREATED,
-    message: 'Product created successfully',
-    data: result,
-  });
-});
+  return productData;
+};
 
+// ============================================
+// CREATE PRODUCT
+// ============================================
+
+const createProduct = catchAsync(
+  async (req: Request, res: Response) => {
+    const files = getProductFiles(req);
+
+    const thumbnailFile = files.thumbnailImage?.[0];
+    const backviewFile = files.backviewImage?.[0];
+    const galleryFiles = files.images || [];
+
+    if (!thumbnailFile) {
+      throw new Error("Product thumbnail image is required");
+    }
+
+    const productData = parseProductData(req.body);
+
+    // Upload all images to Cloudinary
+    const [thumbnailUpload, backviewUpload, galleryUploads] =
+      await Promise.all([
+        uploadBufferToCloudinary(
+          thumbnailFile.buffer,
+          thumbnailFile.originalname,
+          "products",
+        ),
+
+        backviewFile
+          ? uploadBufferToCloudinary(
+              backviewFile.buffer,
+              backviewFile.originalname,
+              "products",
+            )
+          : Promise.resolve(null),
+
+        Promise.all(
+          galleryFiles.map((file) =>
+            uploadBufferToCloudinary(
+              file.buffer,
+              file.originalname,
+              "products",
+            ),
+          ),
+        ),
+      ]);
+
+    const result = await productService.createProduct({
+      ...productData,
+      thumbnailImage: thumbnailUpload.secure_url,
+      backviewImage: backviewUpload?.secure_url || "",
+      images: galleryUploads.map((image) => image.secure_url),
+    });
+
+    return sendResponse(res, {
+      success: true,
+      statusCode: httpStatus.CREATED,
+      message: "Product created successfully",
+      data: result,
+    });
+  },
+);
+
+// ============================================
+// GET ALL PRODUCTS WITHOUT BUILDER
+// ============================================
 
 const getAllProductWithoutBuilder = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
@@ -57,15 +138,20 @@ const getAllProductWithoutBuilder = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get all products successfully',
+      message: "Get all products successfully",
       data: result,
     });
   },
 );
 
+// ============================================
+// GET ALL PRODUCTS
+// ============================================
+
 const getAllProduct = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const query = req.query;
+
     const result = await productService.getAllProduct(
       query as Record<string, string>,
     );
@@ -73,27 +159,39 @@ const getAllProduct = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get all product successfully',
+      message: "Get all products successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// RELATED PRODUCTS
+// ============================================
 
 const getReletiveProduct = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
     const limit = req.query.limit ? Number(req.query.limit) : 8;
 
-    const result = await productService.getRelatedProducts(id as string, limit);
+    const result = await productService.getRelatedProducts(
+      id as string,
+      limit,
+    );
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get all product successfully',
+      message: "Get related products successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// DISCOUNT PRODUCTS
+// ============================================
+
 const getDiscountProducts = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const limit = req.query.limit ? Number(req.query.limit) : 8;
@@ -103,11 +201,16 @@ const getDiscountProducts = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get discount products successfully',
+      message: "Get discount products successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// NEW ARRIVAL PRODUCTS
+// ============================================
+
 const getNewArrivalProducts = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const limit = req.query.limit ? Number(req.query.limit) : 8;
@@ -117,57 +220,79 @@ const getNewArrivalProducts = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get new arrival products successfully',
+      message: "Get new arrival products successfully",
       data: result,
     });
   },
 );
 
+// ============================================
+// PRODUCTS BY CATEGORY
+// ============================================
+
 const getProductsByCategory = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
+
     const result = await productService.getProductsByCategory(id as string);
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get products by category successfully',
+      message: "Get products by category successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// PRODUCTS BY SUBCATEGORY
+// ============================================
 
 const getProductsBySubCategory = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
-    const result = await productService.getProductsBySubCategory(id as string);
+
+    const result = await productService.getProductsBySubCategory(
+      id as string,
+    );
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get products by sub-category successfully',
+      message: "Get products by sub-category successfully",
       data: result,
     });
   },
 );
 
+// ============================================
+// PRODUCTS BY BRAND
+// ============================================
+
 const getProductsByBrand = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
+
     const result = await productService.getProductsByBrand(id as string);
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get products by brand successfully',
+      message: "Get products by brand successfully",
       data: result,
     });
   },
 );
 
+// ============================================
+// PRODUCTS BY LABELS
+// ============================================
+
 const getProductsByLabels = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { label } = req.params;
+
     const result = await productService.getProductsByLabels(
       label as ProductLabel,
     );
@@ -175,123 +300,177 @@ const getProductsByLabels = catchAsync(
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get products by labels successfully',
+      message: "Get products by labels successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// BEST SELLING PRODUCTS
+// ============================================
 
 const getBestSellingProducts = catchAsync(async (req, res) => {
   const limit = Number(req.query.limit) || 8;
 
   const result = await productService.getBestSellingProducts(limit);
 
-  sendResponse(res, {
+  return sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: 'Best selling products retrieved successfully',
+    message: "Best selling products retrieved successfully",
     data: result,
   });
 });
+
+// ============================================
+// TOP PRODUCTS
+// ============================================
+
 const getTopProducts = catchAsync(async (req, res) => {
   const limit = Number(req.query.limit) || 8;
 
   const result = await productService.getTopProducts(limit);
 
-  sendResponse(res, {
+  return sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: 'Top products retrieved successfully',
+    message: "Top products retrieved successfully",
     data: result,
   });
 });
 
+// ============================================
+// SINGLE PRODUCT
+// ============================================
+
 const getSingleProduct = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { id } = req.params;
+
     const result = await productService.getSingleProduct(id as string);
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: ' get single product successfully',
+      message: "Get single product successfully",
       data: result,
     });
   },
 );
+
+// ============================================
+// SINGLE PRODUCT BY SLUG
+// ============================================
 
 const getSingleProductBySlug = catchAsync(
   async (req: Request, res: Response, next: NextFunction) => {
     const { slug } = req.params;
-    const result = await productService.getSingleProductBySlug(slug as string);
+
+    const result = await productService.getSingleProductBySlug(
+      slug as string,
+    );
 
     return sendResponse(res, {
       success: true,
       statusCode: httpStatus.OK,
-      message: 'get single product by slug successfully',
+      message: "Get single product by slug successfully",
       data: result,
     });
   },
 );
 
-const updateSingleProduct = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
+// ============================================
+// UPDATE PRODUCT
+// ============================================
+
+const updateSingleProduct = catchAsync(
+  async (req: Request, res: Response) => {
     const { id } = req.params;
-    const updateData = req.body;
 
-    const files = req.files as {
-      [fieldname: string]: Express.Multer.File[];
-    };
+    const files = getProductFiles(req);
 
-    // Handle updated images if any are uploaded
-    const thumbnailImage = files?.backviewImage?.[0]?.filename;
-    const backviewImage = files?.backviewImage?.[0]?.filename;
-    const images =
-      files?.images?.map((file) => `/uploads/${file.filename}`) || [];
+    const thumbnailFile = files.thumbnailImage?.[0];
+    const backviewFile = files.backviewImage?.[0];
+    const galleryFiles = files.images || [];
 
-    const updatedProduct = {
-      ...updateData,
-      ...(thumbnailImage && { backviewImage: `/uploads/${thumbnailImage}` }),
-      ...(backviewImage && { backviewImage: `/uploads/${backviewImage}` }),
-      ...(images.length > 0 && { images }),
-    };
+    const updateData = parseProductData(req.body);
+
+    // Upload new thumbnail if provided
+    if (thumbnailFile) {
+      const uploaded = await uploadBufferToCloudinary(
+        thumbnailFile.buffer,
+        thumbnailFile.originalname,
+        "products",
+      );
+
+      updateData.thumbnailImage = uploaded.secure_url;
+    }
+
+    // Upload new backview image if provided
+    if (backviewFile) {
+      const uploaded = await uploadBufferToCloudinary(
+        backviewFile.buffer,
+        backviewFile.originalname,
+        "products",
+      );
+
+      updateData.backviewImage = uploaded.secure_url;
+    }
+
+    // Upload new gallery images if provided
+    if (galleryFiles.length > 0) {
+      const uploadedImages = await Promise.all(
+        galleryFiles.map((file) =>
+          uploadBufferToCloudinary(
+            file.buffer,
+            file.originalname,
+            "products",
+          ),
+        ),
+      );
+
+      updateData.images = uploadedImages.map(
+        (image) => image.secure_url,
+      );
+    }
 
     const result = await productService.updateSingleProduct(
       id as string,
-      updatedProduct,
+      updateData,
     );
 
-    res.status(200).json({
+    return sendResponse(res, {
       success: true,
-      message: 'Product updated successfully',
+      statusCode: httpStatus.OK,
+      message: "Product updated successfully",
       data: result,
     });
-  } catch (error) {
-    next(error);
-  }
-};
+  },
+);
 
-const deleteSingleProduct = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  try {
+// ============================================
+// DELETE PRODUCT
+// ============================================
+
+const deleteSingleProduct = catchAsync(
+  async (req: Request, res: Response) => {
     const { id } = req.params;
+
     const result = await productService.deleteSingleProduct(id as string);
-    res.status(200).json({
+
+    return sendResponse(res, {
       success: true,
-      message: 'delete sinngle product successfully',
+      statusCode: httpStatus.OK,
+      message: "Product deleted successfully",
       data: result,
     });
-  } catch (error) {
-    next(error);
-  }
-};
+  },
+);
+
+// ============================================
+// EXPORT CONTROLLER
+// ============================================
 
 export const productController = {
   createProduct,
